@@ -122,6 +122,12 @@ struct Chunk
     }
 };
 
+struct Tokenizer
+{
+    const char* source;
+    
+};
+
 struct Virtual_Machine
 {
     Chunk chunk;
