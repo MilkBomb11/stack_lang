@@ -1,5 +1,5 @@
 cc := g++
-target := main
+target := target/main
 src = main.cpp
 obj := $(wildcard *.o)
 args := -std=c++20
@@ -16,4 +16,4 @@ clean :
 	rm $(obj) $(target)
 
 run :
-	make && ./$(target)
+	./$(target)
