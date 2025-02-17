@@ -3,6 +3,7 @@
 #include<string>
 #include<map>
 #include<vector>
+#include<cstring>
 using namespace std;
 typedef unsigned int u32;
 
@@ -16,6 +17,21 @@ enum Opcode_Name
     ADD, SUB, MUL, DIV,
 };
 
+enum Token_Type
+{
+    LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE,
+    PLUS, MINUS, STAR, SLASH,
+    SEMICOLON,
+    EQUAL, EQUAL_EQUAL, BANG_EQUAL, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL,
+    BANG, VERT_BAR_VERT_BAR, AMPERSAN_AMPERSAN,
+
+    TRUE, FALSE, NIL,
+    FOR, WHILE, FUNC, VAR, IF,
+    NUMBER, IDENTIFIER,
+
+    EOF_,
+};
+
 map<u32, string> opcode_name_to_string =
 {
     {Opcode_Name::RETURN, "RETURN"},
@@ -25,6 +41,51 @@ map<u32, string> opcode_name_to_string =
     {Opcode_Name::SUB, "SUB"},
     {Opcode_Name::MUL, "MUL"},
     {Opcode_Name::DIV, "DIV"},
+};
+
+map<u32, string> token_type_to_string = 
+{
+    {LEFT_PAREN, "LEFT_PAREN"},
+    {RIGHT_PAREN, "LEFT_PAREN"},
+    {LEFT_BRACE, "LEFT_BRACE"},
+    {RIGHT_BRACE, "RIGHT_BRACE"},
+    {PLUS, "PLUS"},
+    {MINUS, "MINUS"},
+    {STAR, "STAR"},
+    {SLASH, "SLASH"},
+    {EQUAL, "EQUAL"},
+    {EQUAL_EQUAL, "EQUAL_EQUAL"},
+    {BANG_EQUAL, "BANG_EQUAL"},
+    {LESS, "LESS"},
+    {LESS_EQUAL, "LESS_EQUAL"},
+    {GREATER, "GREATER"},
+    {GREATER_EQUAL, "GREATER_EQUAL"},
+    {BANG, "BANG"},
+    {VERT_BAR_VERT_BAR, "VERT_BAR_VERT_BAR"},
+    {AMPERSAN_AMPERSAN, "AMPERSAN_AMPERSAN"},
+    {FOR, "FOR"},
+    {WHILE, "WHILE"},
+    {FUNC, "FUNC"},
+    {VAR, "VAR"},
+    {IF, "IF"},
+    {TRUE, "TRUE"},
+    {FALSE, "FALSE"},
+    {NIL, "NIL"},
+    {IDENTIFIER, "IDENTIFIER"},
+    {NUMBER, "NUMBER"},
+    {EOF_, "EOF"},
+};
+
+map<string, Token_Type> keywords =
+{
+    {"true", TRUE},
+    {"false", FALSE},
+    {"nil", NIL},
+    {"for", FOR},
+    {"while", WHILE},
+    {"func", FUNC},
+    {"var", VAR},
+    {"if", IF},
 };
 
 struct Opcode
@@ -62,6 +123,11 @@ struct Value
         bool b;
     }as;
 
+    Value()
+    {
+        this->type = ERROR;
+    }
+
     Value(Type type, auto val)
     {
         this->type = type;
@@ -81,7 +147,7 @@ struct Value
             case Type::BOOL: return format("BOOL({})", this->as.b);      
             default: break;
         }
-        return format("ERROR VALUE");
+        return format("NILVAL");
     }
 };
 
@@ -122,10 +188,151 @@ struct Chunk
     }
 };
 
+
+
+struct Token
+{
+    Token_Type type;
+    string lexeme;
+    Value literal;
+    int line;
+
+    Token(Token_Type type, string lexeme, Value literal, int line)
+    {
+        this->type = type;
+        this->lexeme = lexeme;
+        this->line = line;
+        this->literal = literal;
+    }
+    string to_string() {return format("{} {} {} {}", token_type_to_string[type], lexeme, literal.to_string(), line);}
+};
+
 struct Tokenizer
 {
-    const char* source;
-    
+    string source;
+    int current;
+    int start;
+    int line;
+    vector<Token> tokens; 
+
+    Tokenizer(string source)
+    {
+        this->source = source;
+        this->current = 0;
+        this->start = 0;
+        this->line = 0;
+    }
+
+    void scan_tokens()
+    {
+        while (!is_at_end())
+        {
+            start = current;
+            scan_token();
+        }
+
+        push_token(EOF_);
+    }
+
+    void print_tokens()
+    {
+        for (Token& token : tokens)
+        {cout << token.to_string() << "\n";}
+    }
+
+    void scan_token()
+    {
+        char c = advance();
+        switch (c)
+        {
+            case '(': push_token(LEFT_PAREN); break;
+            case ')': push_token(RIGHT_PAREN); break;
+            case '{': push_token(LEFT_BRACE); break;
+            case '}': push_token(RIGHT_BRACE); break;
+            case '+': push_token(PLUS); break;
+            case '-': push_token(MINUS); break;
+            case '*': push_token(STAR); break;
+            case ';': push_token(SEMICOLON); break;
+            case ' ':
+            case '\t':
+            case '\r': break;
+            case '\n': ++line; break;
+            case '/':
+                if (match('/'))
+                {while (peek() != '\n') {advance();}}
+                else  {push_token(SLASH);} break;
+            case '=': match('=') ? push_token(EQUAL_EQUAL):push_token(EQUAL);break;
+            case '!': match('=') ? push_token(BANG_EQUAL):push_token(BANG);break;
+            case '<': match('=') ? push_token(LESS_EQUAL):push_token(LESS);break;
+            case '>': match('=') ? push_token(GREATER_EQUAL):push_token(GREATER);break;
+            case '|': match('|') ? push_token(VERT_BAR_VERT_BAR):error("missing '|' after '|'");break;
+            case '&': match('&') ? push_token(AMPERSAN_AMPERSAN):error("missing '&' after '&'");break;
+            default:
+                if (is_digit(c)) {number();}
+                else if (is_alpha(c)) {identifier();}
+                else {error(format("Unrecognizable token: '{}'", c));}
+                break;
+        }
+    }
+
+    char advance() {return source[current++];}
+    bool is_at_end() {return current >= source.length();}
+    char peek() 
+    {
+        if (this->is_at_end()) {return '\0';}
+        return source[current];
+    }
+    char peek_next()
+    {
+        if (current+1 >= source.length()) {return '\0';}
+        return source[current+1];
+    }
+    bool match(char expected)
+    {
+        if (this->peek() == expected) {advance(); return true;}
+        return false;
+    }
+    void eat(char expected)
+    {
+        if (this->peek() == expected) {advance(); return;}
+        error(format("Expected \'{}\', got \'{}\'", expected, this->peek()));
+    }
+    void error(string msg)
+    {
+        fprintf(stderr, "Lexer error at line[%d] -> [%s]\n", line, msg.c_str());
+        exit(1);
+    }
+    void push_token(Token_Type type) {this->push_token(type, Value());}
+    void push_token(Token_Type type, Value literal)
+    {
+        string lexeme = source.substr(start, current-start);
+        Token t(type, lexeme, literal, line);
+        tokens.push_back(t);
+    }
+    bool is_alpha(char c) {return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';}
+    bool is_digit(char c) {return c >= '0' && c<= '9';}
+    bool is_alphanumeric(char c) {return is_alpha(c) || is_digit(c);}
+
+    void number()
+    {
+        while (is_digit(peek())) {advance();}
+        if (peek() == '.' && is_digit(peek_next())) 
+        {
+            advance();
+            while (isdigit(peek())) {advance();}
+        }
+        string lexeme = source.substr(start, current-start);
+        Value literal(Type::NUMBER, stod(lexeme));
+        push_token(Token_Type::NUMBER, literal);
+    }
+
+    void identifier()
+    {
+        while (is_alphanumeric(peek())) {advance();}
+        string lexeme = source.substr(start, current-start);
+        if (keywords.find(lexeme) == keywords.end()) {push_token(IDENTIFIER); return;}
+        push_token(keywords[lexeme]);
+    }
 };
 
 struct Virtual_Machine
