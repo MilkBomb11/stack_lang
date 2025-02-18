@@ -3,6 +3,7 @@ target := target/main
 src = main.cpp
 obj := $(wildcard *.o)
 args := -std=c++20
+file = src.st
 
 all : $(target)
 
@@ -16,4 +17,4 @@ clean :
 	rm $(obj) $(target)
 
 run :
-	./$(target) src
+	./$(target) $(file)

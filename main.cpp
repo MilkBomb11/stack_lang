@@ -447,10 +447,8 @@ int main(int argc, char* argv[])
     // vm.chunk = c;
     // vm.run();
     if (argc < 2 || argc > 2) {fprintf(stderr, "Usage: ./[path_to_executable] [path_to_source_file]\n");return 1;}
-
     ifstream in_file(argv[1]);
     if (in_file.fail()) {fprintf(stderr, "the file %s doesn't exist.", argv[1]); return 1;}
-    
     stringstream buffer;
     buffer << in_file.rdbuf();
     Tokenizer tokenizer(buffer.str());
