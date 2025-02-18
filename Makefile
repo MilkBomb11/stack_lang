@@ -16,4 +16,4 @@ clean :
 	rm $(obj) $(target)
 
 run :
-	./$(target)
+	./$(target) src

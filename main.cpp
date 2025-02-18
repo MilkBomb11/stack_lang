@@ -4,6 +4,8 @@
 #include<map>
 #include<vector>
 #include<cstring>
+#include<fstream>
+#include<sstream>
 using namespace std;
 typedef unsigned int u32;
 
@@ -11,81 +13,82 @@ typedef unsigned int u32;
 
 enum Opcode_Name
 {
-    RETURN,
-    CONSTANT,
-    NEG,
-    ADD, SUB, MUL, DIV,
+    OP_RETURN,
+    OP_CONSTANT,
+    OP_NEG,
+    OP_ADD, OP_SUB, OP_MUL, OP_DIV,
 };
 
 enum Token_Type
 {
-    LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE,
-    PLUS, MINUS, STAR, SLASH,
-    SEMICOLON,
-    EQUAL, EQUAL_EQUAL, BANG_EQUAL, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL,
-    BANG, VERT_BAR_VERT_BAR, AMPERSAN_AMPERSAN,
+    TOKEN_LEFT_PAREN, TOKEN_RIGHT_PAREN, TOKEN_LEFT_BRACE, TOKEN_RIGHT_BRACE,
+    TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
+    TOKEN_SEMICOLON,
+    TOKEN_EQUAL, TOKEN_EQUAL_EQUAL, TOKEN_BANG_EQUAL, TOKEN_LESS, TOKEN_LESS_EQUAL, TOKEN_GREATER, TOKEN_GREATER_EQUAL,
+    TOKEN_BANG, TOKEN_VERT_BAR_VERT_BAR, TOKEN_AMPERSAN_AMPERSAN,
 
-    TRUE, FALSE, NIL,
-    FOR, WHILE, FUNC, VAR, IF,
-    NUMBER, IDENTIFIER,
+    TOKEN_TRUE, TOKEN_FALSE, TOKEN_NIL,
+    TOKEN_FOR, TOKEN_WHILE, TOKEN_FUNC, TOKEN_VAR, TOKEN_IF,
+    TOKEN_NUMBER, TOKEN_IDENTIFIER,
 
-    EOF_,
+    TOKEN_EOF,
 };
 
 map<u32, string> opcode_name_to_string =
 {
-    {Opcode_Name::RETURN, "RETURN"},
-    {Opcode_Name::CONSTANT, "CONSTANT"},
-    {Opcode_Name::NEG, "NEG"},
-    {Opcode_Name::ADD, "ADD"},
-    {Opcode_Name::SUB, "SUB"},
-    {Opcode_Name::MUL, "MUL"},
-    {Opcode_Name::DIV, "DIV"},
+    {OP_RETURN, "RETURN"},
+    {OP_CONSTANT, "CONSTANT"},
+    {OP_NEG, "NEG"},
+    {OP_ADD, "ADD"},
+    {OP_SUB, "SUB"},
+    {OP_MUL, "MUL"},
+    {OP_DIV, "DIV"},
 };
 
 map<u32, string> token_type_to_string = 
 {
-    {LEFT_PAREN, "LEFT_PAREN"},
-    {RIGHT_PAREN, "LEFT_PAREN"},
-    {LEFT_BRACE, "LEFT_BRACE"},
-    {RIGHT_BRACE, "RIGHT_BRACE"},
-    {PLUS, "PLUS"},
-    {MINUS, "MINUS"},
-    {STAR, "STAR"},
-    {SLASH, "SLASH"},
-    {EQUAL, "EQUAL"},
-    {EQUAL_EQUAL, "EQUAL_EQUAL"},
-    {BANG_EQUAL, "BANG_EQUAL"},
-    {LESS, "LESS"},
-    {LESS_EQUAL, "LESS_EQUAL"},
-    {GREATER, "GREATER"},
-    {GREATER_EQUAL, "GREATER_EQUAL"},
-    {BANG, "BANG"},
-    {VERT_BAR_VERT_BAR, "VERT_BAR_VERT_BAR"},
-    {AMPERSAN_AMPERSAN, "AMPERSAN_AMPERSAN"},
-    {FOR, "FOR"},
-    {WHILE, "WHILE"},
-    {FUNC, "FUNC"},
-    {VAR, "VAR"},
-    {IF, "IF"},
-    {TRUE, "TRUE"},
-    {FALSE, "FALSE"},
-    {NIL, "NIL"},
-    {IDENTIFIER, "IDENTIFIER"},
-    {NUMBER, "NUMBER"},
-    {EOF_, "EOF"},
+    {TOKEN_LEFT_PAREN, "LEFT_PAREN"},
+    {TOKEN_RIGHT_PAREN, "LEFT_PAREN"},
+    {TOKEN_LEFT_BRACE, "LEFT_BRACE"},
+    {TOKEN_RIGHT_BRACE, "RIGHT_BRACE"},
+    {TOKEN_PLUS, "PLUS"},
+    {TOKEN_MINUS, "MINUS"},
+    {TOKEN_STAR, "STAR"},
+    {TOKEN_SLASH, "SLASH"},
+    {TOKEN_SEMICOLON, "SEMICOLON"},
+    {TOKEN_EQUAL, "EQUAL"},
+    {TOKEN_EQUAL_EQUAL, "EQUAL_EQUAL"},
+    {TOKEN_BANG_EQUAL, "BANG_EQUAL"},
+    {TOKEN_LESS, "LESS"},
+    {TOKEN_LESS_EQUAL, "LESS_EQUAL"},
+    {TOKEN_GREATER, "GREATER"},
+    {TOKEN_GREATER_EQUAL, "GREATER_EQUAL"},
+    {TOKEN_BANG, "BANG"},
+    {TOKEN_VERT_BAR_VERT_BAR, "VERT_BAR_VERT_BAR"},
+    {TOKEN_AMPERSAN_AMPERSAN, "AMPERSAN_AMPERSAN"},
+    {TOKEN_FOR, "FOR"},
+    {TOKEN_WHILE, "WHILE"},
+    {TOKEN_FUNC, "FUNC"},
+    {TOKEN_VAR, "VAR"},
+    {TOKEN_IF, "IF"},
+    {TOKEN_TRUE, "TRUE"},
+    {TOKEN_FALSE, "FALSE"},
+    {TOKEN_NIL, "NIL"},
+    {TOKEN_IDENTIFIER, "IDENTIFIER"},
+    {TOKEN_NUMBER, "NUMBER"},
+    {TOKEN_EOF, "EOF"},
 };
 
 map<string, Token_Type> keywords =
 {
-    {"true", TRUE},
-    {"false", FALSE},
-    {"nil", NIL},
-    {"for", FOR},
-    {"while", WHILE},
-    {"func", FUNC},
-    {"var", VAR},
-    {"if", IF},
+    {"true", TOKEN_TRUE},
+    {"false", TOKEN_FALSE},
+    {"nil", TOKEN_NIL},
+    {"for", TOKEN_FOR},
+    {"while", TOKEN_WHILE},
+    {"func", TOKEN_FUNC},
+    {"var", TOKEN_VAR},
+    {"if", TOKEN_IF},
 };
 
 struct Opcode
@@ -112,7 +115,7 @@ struct Opcode
     }
 };
 
-enum Type {NUMBER, BOOL, ERROR};
+enum Type {VAL_NUMBER, VAL_BOOL, VAL_ERROR};
 
 struct Value
 {
@@ -125,7 +128,7 @@ struct Value
 
     Value()
     {
-        this->type = ERROR;
+        this->type = VAL_ERROR;
     }
 
     Value(Type type, auto val)
@@ -133,8 +136,8 @@ struct Value
         this->type = type;
         switch (this->type)
         {
-            case Type::NUMBER: this->as.n = val; break;
-            case Type::BOOL: this->as.b = val; break;
+            case Type::VAL_NUMBER: this->as.n = val; break;
+            case Type::VAL_BOOL: this->as.b = val; break;
             default: break;
         }
     }
@@ -143,8 +146,8 @@ struct Value
     {
         switch (type)
         {
-            case Type::NUMBER: return format("NUMBER({})", this->as.n);
-            case Type::BOOL: return format("BOOL({})", this->as.b);      
+            case Type::VAL_NUMBER: return format("NUMBER({})", this->as.n);
+            case Type::VAL_BOOL: return format("BOOL({})", this->as.b);    
             default: break;
         }
         return format("NILVAL");
@@ -176,7 +179,7 @@ struct Chunk
     void add_constant(Value value, u32 line)
     {
         int index = this->add_value_to_values(value);
-        this->add_opcode(Opcode(Opcode_Name::CONSTANT, index), line);
+        this->add_opcode(Opcode(OP_CONSTANT, index), line);
     }
 
     void print()
@@ -231,7 +234,7 @@ struct Tokenizer
             scan_token();
         }
 
-        push_token(EOF_);
+        push_token(TOKEN_EOF);
     }
 
     void print_tokens()
@@ -245,14 +248,14 @@ struct Tokenizer
         char c = advance();
         switch (c)
         {
-            case '(': push_token(LEFT_PAREN); break;
-            case ')': push_token(RIGHT_PAREN); break;
-            case '{': push_token(LEFT_BRACE); break;
-            case '}': push_token(RIGHT_BRACE); break;
-            case '+': push_token(PLUS); break;
-            case '-': push_token(MINUS); break;
-            case '*': push_token(STAR); break;
-            case ';': push_token(SEMICOLON); break;
+            case '(': push_token(TOKEN_LEFT_PAREN); break;
+            case ')': push_token(TOKEN_RIGHT_PAREN); break;
+            case '{': push_token(TOKEN_LEFT_BRACE); break;
+            case '}': push_token(TOKEN_RIGHT_BRACE); break;
+            case '+': push_token(TOKEN_PLUS); break;
+            case '-': push_token(TOKEN_MINUS); break;
+            case '*': push_token(TOKEN_STAR); break;
+            case ';': push_token(TOKEN_SEMICOLON); break;
             case ' ':
             case '\t':
             case '\r': break;
@@ -260,13 +263,13 @@ struct Tokenizer
             case '/':
                 if (match('/'))
                 {while (peek() != '\n') {advance();}}
-                else  {push_token(SLASH);} break;
-            case '=': match('=') ? push_token(EQUAL_EQUAL):push_token(EQUAL);break;
-            case '!': match('=') ? push_token(BANG_EQUAL):push_token(BANG);break;
-            case '<': match('=') ? push_token(LESS_EQUAL):push_token(LESS);break;
-            case '>': match('=') ? push_token(GREATER_EQUAL):push_token(GREATER);break;
-            case '|': match('|') ? push_token(VERT_BAR_VERT_BAR):error("missing '|' after '|'");break;
-            case '&': match('&') ? push_token(AMPERSAN_AMPERSAN):error("missing '&' after '&'");break;
+                else  {push_token(TOKEN_SLASH);} break;
+            case '=': match('=') ? push_token(TOKEN_EQUAL_EQUAL):push_token(TOKEN_EQUAL);break;
+            case '!': match('=') ? push_token(TOKEN_BANG_EQUAL):push_token(TOKEN_BANG);break;
+            case '<': match('=') ? push_token(TOKEN_LESS_EQUAL):push_token(TOKEN_LESS);break;
+            case '>': match('=') ? push_token(TOKEN_GREATER_EQUAL):push_token(TOKEN_GREATER);break;
+            case '|': match('|') ? push_token(TOKEN_VERT_BAR_VERT_BAR):error("missing '|' after '|'");break;
+            case '&': match('&') ? push_token(TOKEN_AMPERSAN_AMPERSAN):error("missing '&' after '&'");break;
             default:
                 if (is_digit(c)) {number();}
                 else if (is_alpha(c)) {identifier();}
@@ -322,15 +325,15 @@ struct Tokenizer
             while (isdigit(peek())) {advance();}
         }
         string lexeme = source.substr(start, current-start);
-        Value literal(Type::NUMBER, stod(lexeme));
-        push_token(Token_Type::NUMBER, literal);
+        Value literal(Type::VAL_NUMBER, stod(lexeme));
+        push_token(TOKEN_NUMBER, literal);
     }
 
     void identifier()
     {
         while (is_alphanumeric(peek())) {advance();}
         string lexeme = source.substr(start, current-start);
-        if (keywords.find(lexeme) == keywords.end()) {push_token(IDENTIFIER); return;}
+        if (keywords.find(lexeme) == keywords.end()) {push_token(TOKEN_IDENTIFIER); return;}
         push_token(keywords[lexeme]);
     }
 };
@@ -371,46 +374,46 @@ struct Virtual_Machine
 
             switch (code.name)
             {
-                case RETURN:
+                case OP_RETURN:
                     cout << this->pop().to_string() << "\n";
                     return;
-                case CONSTANT:
+                case OP_CONSTANT:
                     {Value v = this->chunk.values[code.index];
                     this->push(v);
                     break;}
-                case NEG:
+                case OP_NEG:
                     {Value v = this->pop();
-                    if (v.type != NUMBER) {this->error(line, "NEG expects NUMBER.");}
+                    if (v.type != VAL_NUMBER) {this->error(line, "NEG expects NUMBER.");}
                     v.as.n = -v.as.n;
                     this->push(v);
                     break;}
-                case ADD:
+                case OP_ADD:
                     {Value right = this->pop();
                     Value left = this->pop();
-                    if (!(right.type == NUMBER && left.type == NUMBER)) {this->error(line, "ADD expects NUMBER*NUMBER.");}
-                    Value v(NUMBER, left.as.n+right.as.n);
+                    if (!(right.type == VAL_NUMBER && left.type == VAL_NUMBER)) {this->error(line, "ADD expects NUMBER*NUMBER.");}
+                    Value v(VAL_NUMBER, left.as.n+right.as.n);
                     this->push(v);
                     break;}
-                case SUB:
+                case OP_SUB:
                     {Value right = this->pop();
                     Value left = this->pop();
-                    if (!(right.type == NUMBER && left.type == NUMBER)) {this->error(line, "SUB expects NUMBER*NUMBER.");}
-                    Value v(NUMBER, left.as.n-right.as.n);
+                    if (!(right.type == VAL_NUMBER && left.type == VAL_NUMBER)) {this->error(line, "SUB expects NUMBER*NUMBER.");}
+                    Value v(VAL_NUMBER, left.as.n-right.as.n);
                     this->push(v);
                     break;}
-                case MUL:
+                case OP_MUL:
                     {Value right = this->pop();
                     Value left = this->pop();
-                    if (!(right.type == NUMBER && left.type == NUMBER)) {this->error(line, "MUL expects NUMBER*NUMBER.");}
-                    Value v(NUMBER, left.as.n*right.as.n);
+                    if (!(right.type == VAL_NUMBER && left.type == VAL_NUMBER)) {this->error(line, "MUL expects NUMBER*NUMBER.");}
+                    Value v(VAL_NUMBER, left.as.n*right.as.n);
                     this->push(v);
                     break;}
-                case DIV:
+                case OP_DIV:
                     {Value right = this->pop();
                     Value left = this->pop();
-                    if (!(right.type == NUMBER && left.type == NUMBER)) {this->error(line, "DIV expects NUMBER*NUMBER.");}
+                    if (!(right.type == VAL_NUMBER && left.type == VAL_NUMBER)) {this->error(line, "DIV expects NUMBER*NUMBER.");}
                     if (right.as.n == 0) {this->error(line, "Cannont divide by 0.");}
-                    Value v(NUMBER, left.as.n/right.as.n);
+                    Value v(VAL_NUMBER, left.as.n/right.as.n);
                     this->push(v);
                     break;}
                 default:
@@ -429,19 +432,29 @@ struct Virtual_Machine
     }
 };
 
-int main(int arc, char* argv[])
+int main(int argc, char* argv[])
 {
-    Chunk c;
-    c.add_constant(Value(NUMBER, 32), 0);
-    c.add_constant(Value(NUMBER, 16), 0);
-    c.add_opcode(Opcode(ADD), 0);
-    c.add_constant(Value(NUMBER, 15), 0);
-    c.add_opcode(Opcode(DIV), 0);
-    c.add_opcode(Opcode(NEG), 0);
-    c.add_opcode(Opcode(RETURN), 0);
+    // Chunk c;
+    // c.add_constant(Value(NUMBER, 32), 0);
+    // c.add_constant(Value(NUMBER, 16), 0);
+    // c.add_opcode(Opcode(ADD), 0);
+    // c.add_constant(Value(NUMBER, 15), 0);
+    // c.add_opcode(Opcode(DIV), 0);
+    // c.add_opcode(Opcode(NEG), 0);
+    // c.add_opcode(Opcode(RETURN), 0);
     
-    Virtual_Machine vm;
-    vm.chunk = c;
-    vm.run();
+    // Virtual_Machine vm;
+    // vm.chunk = c;
+    // vm.run();
+    if (argc < 2 || argc > 2) {fprintf(stderr, "Usage: ./[path_to_executable] [path_to_source_file]\n");return 1;}
+
+    ifstream in_file(argv[1]);
+    if (in_file.fail()) {fprintf(stderr, "the file %s doesn't exist.", argv[1]); return 1;}
+    
+    stringstream buffer;
+    buffer << in_file.rdbuf();
+    Tokenizer tokenizer(buffer.str());
+    tokenizer.scan_tokens();
+    tokenizer.print_tokens();
     return 0;
 }
