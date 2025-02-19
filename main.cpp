@@ -20,6 +20,11 @@ enum Opcode_Name
     OP_NOT,
     OP_LESS, OP_GREATER, OP_EQUAL,
     OP_TRUE, OP_FALSE, OP_NIL,
+    OP_PRINT,
+    OP_POP,
+    OP_DEFINE_GLOBAL,
+    OP_GET_GLOBAL,
+    OP_SET_GLOBAL,
 };
 
 enum Token_Type
@@ -54,6 +59,10 @@ map<u32, string> opcode_name_to_string =
     {OP_TRUE, "TRUE"},
     {OP_FALSE, "FALSE"},
     {OP_NIL, "NIL"},
+    {OP_PRINT, "PRINT"},
+    {OP_DEFINE_GLOBAL, "DEFINE_GLOBAL"},
+    {OP_GET_GLOBAL, "GET_GLOBAL"},
+    {OP_SET_GLOBAL, "SET_GLOBAL"},
 };
 
 map<u32, string> token_type_to_string = 
@@ -177,6 +186,7 @@ struct Chunk
     vector<Opcode> codes;
     vector<Value> values;
     vector<u32> lines;
+    map<string, int> globals;
 
     int get_codes_len() {return this->codes.size();}
     int get_values_len() {return this->values.size();}
@@ -192,6 +202,13 @@ struct Chunk
         // adds value(immediate) to value array and returns its index
         this->values.push_back(value);
         return this->values.size()-1;
+    }
+
+    int add_global_to_globals(string name)
+    {
+        int index = add_value_to_values(Value(VAL_NIL));
+        globals.insert({name, index});
+        return index;
     }
 
     void add_constant(Value value, u32 line)
@@ -387,7 +404,7 @@ struct Compiler
     vector<Token> tokens;
     Chunk* current_chunk;
 
-    Parse_Rule rules[36]; 
+    Parse_Rule rules[36];
 
     Compiler(vector<Token> tokens)
     {
@@ -413,7 +430,7 @@ struct Compiler
         rules[TOKEN_GREATER_EQUAL]     = {NULL,     "binary",   PREC_COMPARISON};
         rules[TOKEN_LESS]              = {NULL,     "binary",   PREC_COMPARISON};
         rules[TOKEN_LESS_EQUAL]        = {NULL,     "binary",   PREC_COMPARISON};
-        rules[TOKEN_IDENTIFIER]        = {NULL,     NULL,   PREC_NONE};
+        rules[TOKEN_IDENTIFIER]        = {"variable",     NULL,   PREC_NONE};
         rules[TOKEN_STRING]            = {"string",     NULL,  PREC_NONE};
         rules[TOKEN_NUMBER]            = {"number",   NULL,   PREC_NONE};
         rules[TOKEN_AMPERSAN_AMPERSAN] = {NULL,     NULL,   PREC_NONE};
@@ -435,8 +452,10 @@ struct Compiler
     void compile(Chunk* chunk)
     {
         current_chunk = chunk;
-        expression();
-        eat(TOKEN_EOF);
+        while (!match(TOKEN_EOF))
+        {
+            declaration();
+        }
         end_compiler();
     }
 
@@ -475,23 +494,27 @@ struct Compiler
         advance();
         const char* prefix_rule = get_rule(peek_previous().type)->prefix;
         if (prefix_rule == NULL) {error("Expected expression.", peek().line); return;}
-        resolve_rule(prefix_rule);
+        bool can_assign = precedence <= PREC_ASSIGNMENT;
+        resolve_rule(prefix_rule, can_assign);
 
         while (precedence <= get_rule(peek().type)->precedence)
         {
             advance();
             const char* infix_rule = get_rule(peek_previous().type)->infix;
-            resolve_rule(infix_rule);
+            resolve_rule(infix_rule, can_assign);
         }
+
+        if (can_assign && match(TOKEN_EQUAL)) {error("Invalid assignment target.", peek_previous().line);}
     }
 
-    void resolve_rule(const char* str_rule)
+    void resolve_rule(const char* str_rule, bool can_assign)
     {
         if (!strcmp(str_rule, "grouping")){grouping(); return;}
         if (!strcmp(str_rule, "binary"))  {binary(); return;}
         if (!strcmp(str_rule, "unary"))   {unary(); return;}
         if (!strcmp(str_rule, "number"))  {number(); return;}
         if (!strcmp(str_rule, "literal")) {literal(); return;}
+        if (!strcmp(str_rule, "variable")) {variable(can_assign); return;}
     }
 
     void expression() {parse_precedence(PREC_ASSIGNMENT);}
@@ -552,6 +575,83 @@ struct Compiler
             default:break;
         }
     }
+
+    void declaration()
+    {
+        if (match(TOKEN_VAR)) {variable_declaration();}
+        else {statement();}
+    }
+
+    void variable_declaration()
+    {
+        int global_index = parse_variable_name();
+        if (match(TOKEN_EQUAL))
+        {
+            expression();
+        }
+        else
+        {
+            emit_opcode(OP_NIL);
+        }
+        eat(TOKEN_SEMICOLON);
+        define_variable(global_index);
+    }
+
+    int parse_variable_name()
+    {
+        eat(TOKEN_IDENTIFIER);
+        return identifier_constant(peek_previous());
+    }
+
+    int identifier_constant(Token token)
+    {
+        if (current_chunk->globals.find(token.lexeme) == current_chunk->globals.end())
+        {return current_chunk->add_global_to_globals(token.lexeme);}
+        return current_chunk->globals[token.lexeme];
+    }
+
+    void define_variable(int index)
+    {
+        emit_opcode(Opcode(OP_DEFINE_GLOBAL, index));
+    }
+
+    void variable(bool can_assign)
+    {
+        named_variable(peek_previous(), can_assign);
+    }
+
+    void named_variable(Token token, bool can_assign)
+    {
+        int index = identifier_constant(token);
+        if (can_assign && match(TOKEN_EQUAL))
+        {
+            expression();
+            emit_opcode(Opcode(OP_SET_GLOBAL, index));
+        }
+        else {emit_opcode(Opcode(OP_GET_GLOBAL, index));}
+    }
+
+    void statement()
+    {
+        if (match(TOKEN_PRINT)) {print_statement();}
+        else {expression_statement();}
+    }
+
+    void print_statement()
+    {
+        expression();
+        eat(TOKEN_SEMICOLON);
+        emit_opcode(OP_PRINT);
+    }
+
+    void expression_statement()
+    {
+        expression();
+        eat(TOKEN_SEMICOLON);
+        emit_opcode(OP_POP);
+    }
+
+
 };
 
 struct Virtual_Machine
@@ -563,6 +663,12 @@ struct Virtual_Machine
     int get_stack_index() {return this->stack.size();}
 
     void push(Value v) {this->stack.push_back(v);}
+
+    Value peek(int n)
+    {
+        if (stack.size()-n-1 < 0) {error(0, "Tried to reach stack index -1.");}
+        return stack[stack.size()-n-1];
+    }
 
     Value pop()
     {
@@ -590,7 +696,7 @@ struct Virtual_Machine
 
             switch (code.name)
             {
-                case OP_RETURN: cout << this->pop().to_string() << "\n"; return;
+                case OP_RETURN: return;
                 case OP_CONSTANT: {Value v = this->chunk.values[code.index];push(v);break;}
                 case OP_TRUE: push(Value(VAL_BOOL, true));
                 case OP_FALSE: push(Value(VAL_BOOL, false));
@@ -662,8 +768,16 @@ struct Virtual_Machine
                         Value v(VAL_BOOL, left.as.n < right.as.n);
                         push(v);break;
                     }
-                default:
-                    break;
+                case OP_PRINT: cout << pop().to_string() << "\n"; break;
+                case OP_POP: pop(); break;
+                case OP_DEFINE_GLOBAL: chunk.values[code.index] = peek(0); pop(); break;
+                case OP_GET_GLOBAL:
+                    {
+                        Value v = chunk.values[code.index];
+                        push(v);break;
+                    }
+                case OP_SET_GLOBAL: chunk.values[code.index] = peek(0); break;
+                default: break;
             }
             
             if (DEBUG_MODE)
