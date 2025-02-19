@@ -338,6 +338,39 @@ struct Tokenizer
     }
 };
 
+struct Compiler
+{
+    int previous;
+    int current;
+    vector<Token> tokens;
+
+    Compiler(vector<Token> tokens)
+    {
+        this->current = 0;
+        this->tokens = tokens;
+    }
+
+    Token advance() {return tokens[current++];}
+    Token peek() {return tokens[current];}
+    Token peek_previous() {return tokens[previous];}
+    bool is_at_end() {return tokens[current].type == TOKEN_EOF;}
+    bool match(Token_Type expected)
+    {
+        if (peek().type == expected) {advance(); return true;}
+        return false;
+    }
+    void eat(Token_Type expected)
+    {
+        if (peek().type == expected) {advance(); return;}
+        error(format("Expected token of type {}. Got {}.", token_type_to_string[expected], token_type_to_string[peek().type]), peek().line);
+    }
+    void error(string msg, int line)
+    {
+        fprintf(stderr, "Compiler error at line[%d] -> [%s]\n", line, msg.c_str());
+        exit(1);
+    }
+};
+
 struct Virtual_Machine
 {
     Chunk chunk;
