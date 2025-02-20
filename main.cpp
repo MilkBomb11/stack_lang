@@ -27,6 +27,9 @@ enum Opcode_Name
     OP_SET_GLOBAL,
     OP_GET_LOCAL,
     OP_SET_LOCAL,
+    OP_GOTO_IF_FALSE,
+    OP_GOTO_IF_TRUE,
+    OP_GOTO,
 };
 
 enum Token_Type
@@ -62,11 +65,15 @@ map<u32, string> opcode_name_to_string =
     {OP_FALSE, "FALSE"},
     {OP_NIL, "NIL"},
     {OP_PRINT, "PRINT"},
+    {OP_POP, "POP"},
     {OP_DEFINE_GLOBAL, "DEFINE_GLOBAL"},
     {OP_GET_GLOBAL, "GET_GLOBAL"},
     {OP_SET_GLOBAL, "SET_GLOBAL"},
     {OP_GET_LOCAL, "GET_LOCAL"},
     {OP_SET_LOCAL, "SET_LOCAL"},
+    {OP_GOTO_IF_FALSE, "GOTO_IF_FALSE"},
+    {OP_GOTO_IF_TRUE, "GOTO_IF_TRUE"},
+    {OP_GOTO, "GOTO"},
 };
 
 map<u32, string> token_type_to_string = 
@@ -437,6 +444,7 @@ struct Compiler
         this->current = 0;
         this->tokens = tokens;
         this->current_chunk = NULL;
+        this->scope_depth = 0;
         rules[TOKEN_LEFT_PAREN]        = {"grouping", NULL,   PREC_NONE};
         rules[TOKEN_RIGHT_PAREN]       = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_LEFT_BRACE]        = {NULL,     NULL,   PREC_NONE};
@@ -459,14 +467,14 @@ struct Compiler
         rules[TOKEN_IDENTIFIER]        = {"variable",     NULL,   PREC_NONE};
         rules[TOKEN_STRING]            = {"string",     NULL,  PREC_NONE};
         rules[TOKEN_NUMBER]            = {"number",   NULL,   PREC_NONE};
-        rules[TOKEN_AMPERSAN_AMPERSAN] = {NULL,     NULL,   PREC_NONE};
+        rules[TOKEN_AMPERSAN_AMPERSAN] = {NULL,     "and",   PREC_AND};
         rules[TOKEN_ELSE]              = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_FALSE]             = {"literal",     NULL,   PREC_NONE};
         rules[TOKEN_FOR]               = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_FUNC]              = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_IF]                = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_NIL]               = {"literal",     NULL,   PREC_NONE};
-        rules[TOKEN_VERT_BAR_VERT_BAR] = {NULL,     NULL,   PREC_NONE};
+        rules[TOKEN_VERT_BAR_VERT_BAR] = {NULL,     "or",   PREC_OR};
         rules[TOKEN_PRINT]             = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_RETURN]            = {NULL,     NULL,   PREC_NONE};
         rules[TOKEN_TRUE]              = {"literal",     NULL,   PREC_NONE};
@@ -507,6 +515,7 @@ struct Compiler
 
     void emit_opcode(Opcode opcode) {current_chunk->add_opcode(opcode, peek_previous().line);}
     void emit_opcode(Opcode_Name opcode_name) {Opcode o(opcode_name); emit_opcode(o);}
+    void emit_opcode(Opcode_Name opcode_name, int index) {Opcode o(opcode_name, index); emit_opcode(o);}
     void emit_constant(Value val) {current_chunk->add_constant(val, peek_previous().line);}
     void emit_opcodes(Opcode opcode1, Opcode opcode2) {emit_opcode(opcode1);emit_opcode(opcode2);}
     void emit_opcodes(Opcode_Name opcode_name1, Opcode_Name opcode_name2) {emit_opcode(opcode_name1);emit_opcode(opcode_name2);}
@@ -541,9 +550,27 @@ struct Compiler
         if (!strcmp(str_rule, "number"))  {number(); return;}
         if (!strcmp(str_rule, "literal")) {literal(); return;}
         if (!strcmp(str_rule, "variable")) {variable(can_assign); return;}
+        if (!strcmp(str_rule, "and")) {and_(); return;}
+        if (!strcmp(str_rule, "or")) {or_(); return;}
     }
 
     void expression() {parse_precedence(PREC_ASSIGNMENT);}
+
+    void and_()
+    {
+        int end_jump = emit_goto(OP_GOTO_IF_FALSE);
+        emit_opcode(OP_POP);
+        parse_precedence(PREC_AND);
+        patch_goto(end_jump);
+    }
+
+    void or_()
+    {
+        int end_jump = emit_goto(OP_GOTO_IF_TRUE);
+        emit_opcode(OP_POP);
+        parse_precedence(PREC_OR);
+        patch_goto(end_jump);
+    }
 
     void binary()
     {
@@ -723,7 +750,9 @@ struct Compiler
             block_statement();
             end_scope();
         }
-
+        else if (match(TOKEN_IF)) {if_statement();}
+        else if (match(TOKEN_WHILE)) {while_statement();}
+        else if (match(TOKEN_FOR)) {for_statement();}
         else {expression_statement();}
     }
 
@@ -762,7 +791,98 @@ struct Compiler
         emit_opcode(OP_POP);
     }
 
+    int emit_goto(Opcode_Name opcode_name)
+    {
+        emit_opcode(opcode_name);
+        return current_chunk->codes.size()-1;
+    }
 
+    int emit_goto(Opcode_Name opcode_name, int index)
+    {
+        emit_opcode(opcode_name, index);
+        return current_chunk->codes.size()-1;
+    }
+
+    void patch_goto(int index)
+    {
+        Opcode_Name name = current_chunk->codes[index].name; 
+        if (name != OP_GOTO && name != OP_GOTO_IF_TRUE && name != OP_GOTO_IF_FALSE)
+        {error("Tried to patch an opcode which is not a GOTO.", peek().line);}
+        current_chunk->codes[index].index = current_chunk->codes.size();
+    }
+
+    void if_statement()
+    {
+        eat(TOKEN_LEFT_PAREN);
+        expression();
+        eat(TOKEN_RIGHT_PAREN);
+        int goto_else = emit_goto(OP_GOTO_IF_FALSE);
+        emit_opcode(OP_POP);
+        statement();
+        int goto_end = emit_goto(OP_GOTO);
+        patch_goto(goto_else);
+        emit_opcode(OP_POP);
+        if (match(TOKEN_ELSE)) {statement();}
+        patch_goto(goto_end);
+    }
+
+    void while_statement()
+    {
+        int loop_start = current_chunk->codes.size();
+        eat(TOKEN_LEFT_PAREN);
+        expression();
+        eat(TOKEN_RIGHT_PAREN);
+        int goto_exit = emit_goto(OP_GOTO_IF_FALSE);
+        emit_opcode(OP_POP);
+        statement();
+        emit_goto(OP_GOTO, loop_start);
+        patch_goto(goto_exit);
+        emit_opcode(OP_POP);
+    }
+
+    void for_statement()
+    {
+        begin_scope();
+        eat(TOKEN_LEFT_PAREN);
+        if (match(TOKEN_SEMICOLON)) {}
+        else if (match(TOKEN_VAR)) {variable_declaration();}
+        else {expression_statement();}
+
+        int loop_start = current_chunk->codes.size();
+        int goto_exit = -1;
+        if (!match(TOKEN_SEMICOLON))
+        {
+            expression();
+            eat(TOKEN_SEMICOLON);
+            goto_exit = emit_goto(OP_GOTO_IF_FALSE);
+            emit_opcode(OP_POP);
+        }
+        
+        if (!match(TOKEN_RIGHT_PAREN))
+        {
+            int goto_body = emit_goto(OP_GOTO);
+            int increment_start = current_chunk->codes.size();
+            expression();
+            emit_opcode(OP_POP);
+            eat(TOKEN_RIGHT_PAREN);
+
+            emit_goto(OP_GOTO, loop_start);
+            loop_start = increment_start;
+            patch_goto(goto_body);    
+        }
+
+        statement();
+        emit_goto(OP_GOTO, loop_start);
+        if (goto_exit != -1)
+        {
+            patch_goto(goto_exit);
+            emit_opcode(OP_POP);
+        }
+
+        end_scope();
+    }
+
+    
 };
 
 struct Virtual_Machine
@@ -890,6 +1010,9 @@ struct Virtual_Machine
                 case OP_SET_GLOBAL: chunk.values[code.index] = peek(0); break;
                 case OP_GET_LOCAL: push(stack[code.index]);break;
                 case OP_SET_LOCAL: stack[code.index] = peek(0); break;
+                case OP_GOTO_IF_FALSE: if (!peek(0).as.b) {instruction_index = code.index;} break;
+                case OP_GOTO_IF_TRUE: if (peek(0).as.b) {instruction_index = code.index;} break;
+                case OP_GOTO: instruction_index = code.index; break;
                 default: break;
             }
             
