@@ -25,6 +25,8 @@ enum Opcode_Name
     OP_DEFINE_GLOBAL,
     OP_GET_GLOBAL,
     OP_SET_GLOBAL,
+    OP_GET_LOCAL,
+    OP_SET_LOCAL,
 };
 
 enum Token_Type
@@ -38,9 +40,9 @@ enum Token_Type
     TOKEN_TRUE, TOKEN_FALSE, TOKEN_NIL,
     TOKEN_RETURN, TOKEN_PRINT,
     TOKEN_FOR, TOKEN_WHILE, TOKEN_FUNC, TOKEN_VAR, TOKEN_IF, TOKEN_ELSE,
-    TOKEN_NUMBER, TOKEN_STRING, TOKEN_IDENTIFIER,
+    TOKEN_NUMBER, TOKEN_STRING, TOKEN_IDENTIFIER, 
 
-    TOKEN_EOF,
+    TOKEN_EOF, TOKEN_ERROR,
 };
 
 map<u32, string> opcode_name_to_string =
@@ -63,6 +65,8 @@ map<u32, string> opcode_name_to_string =
     {OP_DEFINE_GLOBAL, "DEFINE_GLOBAL"},
     {OP_GET_GLOBAL, "GET_GLOBAL"},
     {OP_SET_GLOBAL, "SET_GLOBAL"},
+    {OP_GET_LOCAL, "GET_LOCAL"},
+    {OP_SET_LOCAL, "SET_LOCAL"},
 };
 
 map<u32, string> token_type_to_string = 
@@ -235,6 +239,11 @@ struct Token
     Value literal;
     int line;
 
+    Token()
+    {
+        type = TOKEN_ERROR;
+    }
+
     Token(Token_Type type, string lexeme, Value literal, int line)
     {
         this->type = type;
@@ -397,12 +406,29 @@ struct Parse_Rule
     Precedence precedence;
 };
 
+struct Local
+{
+    Token name;
+    int depth;
+
+    Local() {}
+
+    Local(Token name, int depth)
+    {
+        this->name = name;
+        this->depth = depth;
+    }
+};
+
 struct Compiler
 {
     int previous;
     int current;
     vector<Token> tokens;
     Chunk* current_chunk;
+
+    vector<Local> locals; // makeshift stack which tells you where each local variable is stored in runtime, during compiletime.
+    int scope_depth;
 
     Parse_Rule rules[36];
 
@@ -600,6 +626,8 @@ struct Compiler
     int parse_variable_name()
     {
         eat(TOKEN_IDENTIFIER);
+        declare_local_variable();
+        if (scope_depth > 0) {return 0;}
         return identifier_constant(peek_previous());
     }
 
@@ -612,6 +640,11 @@ struct Compiler
 
     void define_variable(int index)
     {
+        if (scope_depth > 0)
+        {
+            mark_local_initialized();
+            return;
+        }
         emit_opcode(Opcode(OP_DEFINE_GLOBAL, index));
     }
 
@@ -622,19 +655,97 @@ struct Compiler
 
     void named_variable(Token token, bool can_assign)
     {
-        int index = identifier_constant(token);
+        int index = resolve_local(token);
+        Opcode_Name get_op;
+        Opcode_Name set_op;
+        if (index != -1)
+        {
+            get_op = OP_GET_LOCAL;
+            set_op = OP_SET_LOCAL;
+        }
+        else
+        {
+            index = identifier_constant(token);
+            get_op = OP_GET_GLOBAL;
+            set_op = OP_SET_GLOBAL;
+        }
+
         if (can_assign && match(TOKEN_EQUAL))
         {
             expression();
-            emit_opcode(Opcode(OP_SET_GLOBAL, index));
+            emit_opcode(Opcode(set_op, index));
         }
-        else {emit_opcode(Opcode(OP_GET_GLOBAL, index));}
+        else {emit_opcode(Opcode(get_op, index));}
+    }
+
+    void declare_local_variable()
+    {
+        if (scope_depth == 0) {return;}
+        Token name = peek_previous();
+
+        for (int i = locals.size()-1; i >= 0; i--)
+        {
+            Local& local = locals[i];
+            if (local.depth != -1 && local.depth < scope_depth) {break;}
+            if (name.lexeme == local.name.lexeme) {error("Already a local variable with the same name exits in this scope.", name.line);}
+        }
+        add_local(name);
+    }
+
+    void mark_local_initialized() {locals[locals.size()-1].depth = scope_depth;}
+
+    void add_local(Token name)
+    {
+        Local local(name, scope_depth);
+        locals.push_back(local);
+    }
+
+    int resolve_local(Token name)
+    {
+        for (int i = locals.size()-1; i >= 0; i--)
+        {
+            Local& local = locals[i];
+            if (name.lexeme == local.name.lexeme) 
+            {
+                if (local.depth == -1) {error("Can't read local variable in its own initialization.", name.line);}
+                return i;
+            }
+        }
+        return -1;
     }
 
     void statement()
     {
         if (match(TOKEN_PRINT)) {print_statement();}
+        else if (match(TOKEN_LEFT_BRACE))
+        {
+            begin_scope();
+            block_statement();
+            end_scope();
+        }
+
         else {expression_statement();}
+    }
+
+    void begin_scope()
+    {
+        scope_depth++;
+    }
+
+    void end_scope()
+    {
+        scope_depth--;
+        while (locals.size() > 0 && locals[locals.size()-1].depth > scope_depth)
+        {
+            emit_opcode(OP_POP);
+            locals.pop_back();
+        }
+    }
+
+    void block_statement()
+    {
+        while (peek().type != TOKEN_RIGHT_BRACE && peek().type != TOKEN_EOF) {declaration();}
+        eat(TOKEN_RIGHT_BRACE);
     }
 
     void print_statement()
@@ -777,6 +888,8 @@ struct Virtual_Machine
                         push(v);break;
                     }
                 case OP_SET_GLOBAL: chunk.values[code.index] = peek(0); break;
+                case OP_GET_LOCAL: push(stack[code.index]);break;
+                case OP_SET_LOCAL: stack[code.index] = peek(0); break;
                 default: break;
             }
             
