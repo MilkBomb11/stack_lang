@@ -30,6 +30,10 @@ enum Opcode_Name
     OP_GOTO_IF_FALSE,
     OP_GOTO_IF_TRUE,
     OP_GOTO,
+    OP_CALL,
+    OP_STORE_TO_RET,
+    OP_PUSH_FROME_RET,
+    OP_END,
 };
 
 enum Token_Type
@@ -43,7 +47,7 @@ enum Token_Type
     TOKEN_TRUE, TOKEN_FALSE, TOKEN_NIL,
     TOKEN_RETURN, TOKEN_PRINT,
     TOKEN_FOR, TOKEN_WHILE, TOKEN_FUNC, TOKEN_VAR, TOKEN_IF, TOKEN_ELSE,
-    TOKEN_NUMBER, TOKEN_STRING, TOKEN_IDENTIFIER, 
+    TOKEN_NUMBER, TOKEN_STRING, TOKEN_IDENTIFIER,
 
     TOKEN_EOF, TOKEN_ERROR,
 };
@@ -74,6 +78,10 @@ map<u32, string> opcode_name_to_string =
     {OP_GOTO_IF_FALSE, "GOTO_IF_FALSE"},
     {OP_GOTO_IF_TRUE, "GOTO_IF_TRUE"},
     {OP_GOTO, "GOTO"},
+    {OP_CALL, "CALL"},
+    {OP_END, "END"},
+    {OP_STORE_TO_RET, "OP_STORE_TO_RET"},
+    {OP_PUSH_FROME_RET, "OP_PUSH_FROME_RET"},
 };
 
 map<u32, string> token_type_to_string = 
@@ -126,7 +134,8 @@ map<string, Token_Type> keywords =
     {"var", TOKEN_VAR},
     {"if", TOKEN_IF},
     {"else", TOKEN_ELSE},
-    {"print", TOKEN_PRINT},    
+    {"print", TOKEN_PRINT},
+    {"return", TOKEN_RETURN},
 };
 
 struct Opcode
@@ -222,10 +231,11 @@ struct Chunk
         return index;
     }
 
-    void add_constant(Value value, u32 line)
+    int add_constant(Value value, u32 line)
     {
         int index = this->add_value_to_values(value);
         this->add_opcode(Opcode(OP_CONSTANT, index), line);
+        return index;
     }
 
     void print()
@@ -516,11 +526,11 @@ struct Compiler
     void emit_opcode(Opcode opcode) {current_chunk->add_opcode(opcode, peek_previous().line);}
     void emit_opcode(Opcode_Name opcode_name) {Opcode o(opcode_name); emit_opcode(o);}
     void emit_opcode(Opcode_Name opcode_name, int index) {Opcode o(opcode_name, index); emit_opcode(o);}
-    void emit_constant(Value val) {current_chunk->add_constant(val, peek_previous().line);}
+    int emit_constant(Value val) {return current_chunk->add_constant(val, peek_previous().line);}
     void emit_opcodes(Opcode opcode1, Opcode opcode2) {emit_opcode(opcode1);emit_opcode(opcode2);}
     void emit_opcodes(Opcode_Name opcode_name1, Opcode_Name opcode_name2) {emit_opcode(opcode_name1);emit_opcode(opcode_name2);}
-    void emit_return() {emit_opcode(OP_RETURN);}
-    void end_compiler(){emit_return();}
+    void emit_end() {emit_opcode(OP_END);}
+    void end_compiler(){emit_end();}
 
     Parse_Rule* get_rule(Token_Type type) {return &rules[type];}
 
@@ -632,20 +642,38 @@ struct Compiler
     void declaration()
     {
         if (match(TOKEN_VAR)) {variable_declaration();}
+        else if (match(TOKEN_FUNC)) {function_declaration();}
         else {statement();}
+    }
+
+    void function_declaration()
+    {
+        if (scope_depth > 0) {error("Only global functions are allowed.", peek_previous().line);}
+        int goto_end = emit_goto(OP_GOTO);
+        int global_index = parse_variable_name();
+        begin_scope();
+        eat(TOKEN_LEFT_PAREN);
+        int arity = 0;
+        while (match(TOKEN_IDENTIFIER))
+        {
+            add_local(peek_previous());
+            arity++;
+            if (!match(TOKEN_COMMA)) {break;}
+        }
+        eat(TOKEN_RIGHT_PAREN);
+        int function_body_instruction_index = current_chunk->codes.size();
+        current_chunk->values[global_index] = Value(VAL_NUMBER, function_body_instruction_index);
+        statement();
+        for (int i = 0; i < arity; i++) {locals.pop_back();}
+        scope_depth--;
+        patch_goto(goto_end);
     }
 
     void variable_declaration()
     {
         int global_index = parse_variable_name();
-        if (match(TOKEN_EQUAL))
-        {
-            expression();
-        }
-        else
-        {
-            emit_opcode(OP_NIL);
-        }
+        if (match(TOKEN_EQUAL)) {expression();}
+        else {emit_opcode(OP_NIL);}
         eat(TOKEN_SEMICOLON);
         define_variable(global_index);
     }
@@ -702,8 +730,29 @@ struct Compiler
             expression();
             emit_opcode(Opcode(set_op, index));
         }
+        else if (match(TOKEN_LEFT_PAREN)) {call_function(get_op, index);}
         else {emit_opcode(Opcode(get_op, index));}
     }
+
+    void call_function(Opcode_Name get_op, int index)
+    {
+        emit_constant(Value(VAL_NUMBER, 0)); // return val
+        int addr_index = emit_constant(Value(VAL_NUMBER, 0)); // return address
+        int arity = 0;
+        while (true) // arguements
+        {
+            expression();
+            arity++;
+            if (!match(TOKEN_COMMA)) {break;}
+        }
+        eat(TOKEN_RIGHT_PAREN);
+        emit_opcode(Opcode(get_op, index)); // in runtime, the instruction index to the start of function will be on top of stack.
+        emit_opcode(OP_CALL, arity);
+        patch_constant(addr_index, Value(VAL_NUMBER, current_chunk->codes.size()));
+        emit_opcode(OP_POP); // return address
+    }
+
+    void patch_constant(int index, Value val) {current_chunk->values[index] = val;}
 
     void declare_local_variable()
     {
@@ -753,6 +802,7 @@ struct Compiler
         else if (match(TOKEN_IF)) {if_statement();}
         else if (match(TOKEN_WHILE)) {while_statement();}
         else if (match(TOKEN_FOR)) {for_statement();}
+        else if (match(TOKEN_RETURN)) {return_statement();}
         else {expression_statement();}
     }
 
@@ -882,7 +932,12 @@ struct Compiler
         end_scope();
     }
 
-    
+    void return_statement()
+    {
+        expression();
+        eat(TOKEN_SEMICOLON);
+        emit_opcode(OP_RETURN);
+    }
 };
 
 struct Virtual_Machine
@@ -890,6 +945,9 @@ struct Virtual_Machine
     Chunk chunk;
     vector<Value> stack;
     int instruction_index = -1;
+    int frame_index = 0;
+    vector<int> frame_index_history;
+    Value ret_register;
 
     int get_stack_index() {return this->stack.size();}
 
@@ -927,7 +985,17 @@ struct Virtual_Machine
 
             switch (code.name)
             {
-                case OP_RETURN: return;
+                case OP_END: return;
+                case OP_RETURN:
+                    {
+                        Value v = pop();
+                        stack[frame_index-2] = v;
+                        instruction_index = stack[frame_index-1].as.n;
+                        while (stack.size()-1 >= frame_index) {pop();}
+                        frame_index = frame_index_history[frame_index_history.size()-1];
+                        frame_index_history.pop_back();
+                        break;
+                    }
                 case OP_CONSTANT: {Value v = this->chunk.values[code.index];push(v);break;}
                 case OP_TRUE: push(Value(VAL_BOOL, true));
                 case OP_FALSE: push(Value(VAL_BOOL, false));
@@ -999,6 +1067,14 @@ struct Virtual_Machine
                         Value v(VAL_BOOL, left.as.n < right.as.n);
                         push(v);break;
                     }
+                case OP_GREATER:
+                    {
+                        Value right = this->pop();
+                        Value left = this->pop();
+                        if (!(right.type == VAL_NUMBER && left.type == VAL_NUMBER)) {error(line, "LESS expects NUMBER*NUMBER");}
+                        Value v(VAL_BOOL, left.as.n > right.as.n);
+                        push(v);break;
+                    }
                 case OP_PRINT: cout << pop().to_string() << "\n"; break;
                 case OP_POP: pop(); break;
                 case OP_DEFINE_GLOBAL: chunk.values[code.index] = peek(0); pop(); break;
@@ -1008,11 +1084,21 @@ struct Virtual_Machine
                         push(v);break;
                     }
                 case OP_SET_GLOBAL: chunk.values[code.index] = peek(0); break;
-                case OP_GET_LOCAL: push(stack[code.index]);break;
-                case OP_SET_LOCAL: stack[code.index] = peek(0); break;
+                case OP_GET_LOCAL: push(stack[code.index+frame_index]);break;
+                case OP_SET_LOCAL: stack[code.index+frame_index] = peek(0); break;
                 case OP_GOTO_IF_FALSE: if (!peek(0).as.b) {instruction_index = code.index;} break;
                 case OP_GOTO_IF_TRUE: if (peek(0).as.b) {instruction_index = code.index;} break;
                 case OP_GOTO: instruction_index = code.index; break;
+                case OP_CALL:
+                    {
+                        Value v = pop();
+                        instruction_index = v.as.n;
+                        frame_index_history.push_back(frame_index);
+                        frame_index = stack.size()-code.index;
+                        break;
+                    }
+                case OP_STORE_TO_RET: ret_register = peek(0); break;
+                case OP_PUSH_FROME_RET: push(ret_register); ret_register = Value(); break;
                 default: break;
             }
             
@@ -1022,6 +1108,7 @@ struct Virtual_Machine
                 {
                     cout << format("[{}]", v.to_string());
                 }
+                cout << format(" fp:{}", frame_index);
                 cout << "\n";
             }
         }

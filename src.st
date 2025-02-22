@@ -1,4 +1,11 @@
-for (var i = 0; i < 5; i = i + 1)
+func f(x, y)
 {
-    print(i);
+    return (x+y);
 }
+
+func g(x, y)
+{
+    return (x*y);
+}
+
+print(f(3, g(4, 5*2)));
