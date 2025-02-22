@@ -325,7 +325,7 @@ struct Tokenizer
             case '\n': ++line; break;
             case '/':
                 if (match('/'))
-                {while (peek() != '\n') {advance();}}
+                {while (peek() != '\n' && !is_at_end()) {advance();}}
                 else  {push_token(TOKEN_SLASH);} break;
             case '=': match('=') ? push_token(TOKEN_EQUAL_EQUAL):push_token(TOKEN_EQUAL);break;
             case '!': match('=') ? push_token(TOKEN_BANG_EQUAL):push_token(TOKEN_BANG);break;
