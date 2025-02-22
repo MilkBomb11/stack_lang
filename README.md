@@ -20,7 +20,7 @@ g++ -std=c++20 src.st -o main && ./main
 g++ -std=c++20 src.st -o main >> ./main.exe
 ```
 ## Syntax
-The syntax is for the most part identical to C, so I will only showcase the parts that deviates from it.
+The syntax is for the most part identical to that of C, so I will only showcase the parts that deviate from it.
 ### Variable Declaration
 Use the `var` keyword to declare variables. You can declare variables without the `var` keyword just like in Python, but this will make them global variables.
 ```c
