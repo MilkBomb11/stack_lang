@@ -46,4 +46,4 @@ print(z); // prints 10, because z is global.
 ```
 ## Resources that helped me
 - https://craftinginterpreters.com/
-- https://www.youtube.com/watch?v=2vBVvQTTdXg&t=1361s
+- https://www.youtube.com/watch?v=2vBVvQTTdXg
